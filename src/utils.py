@@ -7,16 +7,18 @@ class DialogueManager:
     def __init__(self, system_prompt=None, log_path=None):
         self.path = log_path
         self.system_prompt = system_prompt
-        self._data = [
+        self._base = [
             {
                 "role": "system",
                 "content": self.system_prompt
             }
         ]
 
+        self._data = deepcopy(self._base.copy())
+
     def data(self): return deepcopy(self._data)
     def add(self, messages): self._data.extend(messages); self.save()
-    def reset(self): self._data = []; self.save()
+    def reset(self): self._data = deepcopy(self._base); self.save()
 
     def save(self):
         if self.path is not None:
@@ -29,17 +31,17 @@ class Base:
         ...
         
     def format_question(self, q): return (q or "").strip()
-    def extract_output(self, o): return {"answer": o, "citations": None}
+    def extract_response(self, o): return {"answer": o, "citations": None}
     def format_facts(self, f): return ""
     def format_citations(self, c): return ""
     
-    def format_input(self, question, facts=None):
+    def format_user(self, question, facts=None):
         question = self.format_question(question)
         user = {"role":"user", "content": f"{question}"} ## for sft 
         meta = {"role":"user", "content": f"{question}"} ## for eval and history
         return user, meta
 
-    def format_output(self, content, citations=None):
+    def format_assistant(self, content, citations=None):
         assistant = {"role":"assistant", "content": content}                     ## for sft 
         meta =      {"role":"assistant", "content": content, "citations": None}  ## for eval and history
         return assistant, meta
@@ -55,7 +57,7 @@ class Context(Base):
         context_block = "\n".join(context_lines)
         return context_block
 
-    def format_input(self, question, facts):
+    def format_user(self, question, facts):
         question = self.format_question(question)
         context = self.format_facts(facts)
         user = {"role":"user", "content": f"{question}\n{context}".strip()} ## for sft 
@@ -92,7 +94,7 @@ class ContextCitations(Base):
                     continue
         raise ValueError("No valid JSON found.")
 
-    def format_input(self, question, facts):
+    def format_user(self, question, facts):
         question = self.format_question(question)
         context = self.format_facts(facts)
         facts = json.dumps([{"fid":f['id'], "text":f['title']} for f in facts], ensure_ascii=False)
@@ -100,7 +102,7 @@ class ContextCitations(Base):
         meta = {"role":"user", "content": f"{question}", "context":facts}   ## for eval
         return user, meta
 
-    def format_output(self, content, citations):
+    def format_assistant(self, content, citations):
         citations = self.format_citations(citations)
         ## for sft (LLama factory)
         ## ทำไมต้อง ่json.dumps; เพราะตอน last turn ต้องใช้
@@ -116,7 +118,7 @@ class ContextCitations(Base):
         meta = {"role":"assistant", "content": content, "llm_citations": citations}
         return assistant, meta
 
-    def extract_output(self, llm_response):
+    def extract_response(self, llm_response):
         try:
             out = self.extract_json(llm_response)
             ans = out.get("answer", out)
@@ -141,14 +143,14 @@ class FormatPrompt:
             raise ValueError(f"Unknown template: {prompt_template}")
 
     
-    def format_input(self, question, facts):
-        return self.template.format_input(question=question, facts=facts)
+    def format_user(self, question, facts):
+        return self.template.format_user(question=question, facts=facts)
 
-    def format_output(self, assistant, citations):
-        return self.template.format_output(assistant, citations)
+    def format_assistant(self, assistant, citations):
+        return self.template.format_assistant(assistant, citations)
 
-    def extract_output(self, text):
-        return self.template.extract_output(text)
+    def extract_response(self, text):
+        return self.template.extract_response(text)
     
     def get_system_prompt(self):
         return self.template.system_prompt
